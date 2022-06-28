@@ -90,11 +90,11 @@ jobs:
         id: go_build
         run: >-
           go build
-            -trimpath 
-            -gcflags="all=-N -l"
-            -ldflags="-X 'main.BuildVersion=${{ env.PLANNED_VERSION }}'"
-            -v -buildmode=plugin
-            -o "${{ steps.set_artifact_name.outputs.name }}"
+          -trimpath 
+          -gcflags="all=-N -l"
+          -ldflags="-X 'main.BuildVersion=${{ env.PLANNED_VERSION }}'"
+          -v -buildmode=plugin
+          -o "${{ steps.set_artifact_name.outputs.name }}"
 
 
       - name: Upload a Build Artifact
@@ -113,117 +113,6 @@ jobs:
           rest_gateway_url: "${{ secrets.REST_GATEWAY_API_URL }}"
           rest_gateway_token: "${{ secrets.REST_GATEWAY_TOKEN }}"
           rest_gateway_bot_name: "${{ secrets.REST_GATEWAY_BOT_NAME }}"
-
-
-  docker_image:
-    name: Docker image
-    runs-on: ubuntu-latest
-    outputs:
-      job_status: ${{ job.status }}
-
-    needs:
-      - validate_new_version
-
-    env:
-      PLANNED_VERSION: ${{ needs.validate_new_version.outputs.planned_version }}
-      TAG_HASH: ${{ needs.validate_new_version.outputs.tag_hash }}
-      CAN_CREATE_RELEASE: ${{ needs.validate_new_version.outputs.can_create }}
-      TAG_EXISTS: ${{ needs.validate_new_version.outputs.tag_exists }}
-      BRANCH_NAME: ${{ needs.validate_new_version.outputs.branch_name }}
-      APP_NAME: "plugin-echo-conveyor"
-      TARGETOS: "linux"
-      TARGETARCH: "amd64"
-
-    if: >
-      needs.validate_new_version.outputs.branch_name != 'master' &&
-      github.event_name == 'push'
-
-    steps:
-
-      - name: Validate envionment variables
-        id: validate_envvars
-        shell: bash
-        run: |
-          [[ ! -z "PLANNED_VERSION" ]] || exit 2
-          [[ ! -z "TAG_HASH" ]] || exit 2
-          [[ ! -z "CAN_CREATE_RELEASE" ]] || exit 2
-          [[ ! -z "TAG_EXISTS" ]] || exit 2
-          [[ ! -z "BRANCH_NAME" ]] || exit 2
-
-
-      - name: Check out code
-        uses: actions/checkout@v2
-        with:
-          fetch-depth: 0
-
-
-      - name: Login to Docker registry
-        id: docker_registry_login
-        run: |
-          echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
-
-
-      - name: Define Docker image ID and full name
-        id: set_docker_image_id
-        run: |
-          if [[ "${BRANCH_NAME}" == "master" ]]; then
-            short_suffix=""
-            long_suffix=""
-          else
-            short_suffix="${BRANCH_NAME:0:1}"
-            long_suffix="${BRANCH_NAME}"
-          fi
-
-          GITHUB_IMAGE_ID="$(echo "${{ github.repository }}/${APP_NAME}" | tr '[A-Z]' '[a-z]')"
-          GITHUB_IMAGE_FULL_NAME="${GITHUB_IMAGE_ID}:${PLANNED_VERSION}${long_suffix}"
-
-          echo "::debug::GITHUB_IMAGE_ID: ${GITHUB_IMAGE_ID}"
-          echo "::debug::GITHUB_IMAGE_FULL_NAME: ${GITHUB_IMAGE_FULL_NAME}"
-
-          echo "::set-output name=github_image_id::${GITHUB_IMAGE_ID}"
-          echo "::set-output name=github_image_full_name::${GITHUB_IMAGE_FULL_NAME}"
-
-
-      - name: Build Docker image
-        id: build_docker_image
-        shell: bash
-        run: >
-          docker build
-          --tag "ghcr.io/${{ steps.set_docker_image_id.outputs.github_image_full_name }}"
-          --build-arg BUILD_VERSION="${PLANNED_VERSION}"
-          --file Dockerfile
-          .
-
-
-      - name: Push Docker image to registry
-        run: |
-          docker push "ghcr.io/${{ steps.set_docker_image_id.outputs.github_image_full_name }}"
-
-
-      - name: Notify about build
-        uses: rest-gateway/notification-action@master
-        with:
-          message: |
-            <b>Build ${{env.APP_NAME}}:</b> ${{env.PLANNED_VERSION}} ${{env.BRANCH_NAME}}
-
-            <b>Docker image:</b>
-            ghcr.io/${{ steps.set_docker_image_id.outputs.github_image_full_name }}
-
-          recipient: "${{ secrets.NOTIFICATIONS_DEFAULT_RECIPIENT }}"
-          rest_gateway_url: "${{ secrets.REST_GATEWAY_API_URL }}"
-          rest_gateway_token: "${{ secrets.REST_GATEWAY_TOKEN }}"
-          rest_gateway_bot_name: "${{ secrets.REST_GATEWAY_BOT_NAME }}"
-
-
-      - name: Send out notification about release
-        uses: rest-gateway/notification-action@master
-        with:
-          message: "Release ${{env.PLANNED_VERSION}} happened for <b>${{env.APP_NAME}}</b>. Yay."
-          recipient: "${{ secrets.NOTIFICATIONS_DEFAULT_RECIPIENT }}"
-          rest_gateway_url: "${{ secrets.REST_GATEWAY_API_URL }}"
-          rest_gateway_token: "${{ secrets.REST_GATEWAY_TOKEN }}"
-          rest_gateway_bot_name: "${{ secrets.REST_GATEWAY_BOT_NAME }}"
-
 
   release:
     name: Build, Test, Packages
@@ -266,62 +155,6 @@ jobs:
           [[ ! -z "CAN_CREATE_RELEASE" ]] || exit 2
           [[ ! -z "TAG_EXISTS" ]] || exit 2
           [[ ! -z "BRANCH_NAME" ]] || exit 2
-
-
-      - name: Login to Docker registry
-        id: docker_registry_login
-        run: |
-          echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
-
-
-      - name: Define Docker image ID and full name
-        id: set_docker_image_id
-        run: |
-          if [[ "${BRANCH_NAME}" == "master" ]]; then
-            short_suffix=""
-            long_suffix=""
-          else
-            short_suffix="${BRANCH_NAME:0:1}"
-            long_suffix="${BRANCH_NAME}"
-          fi
-
-          GITHUB_IMAGE_ID="$(echo "${{ github.repository }}/${APP_NAME}" | tr '[A-Z]' '[a-z]')"
-          GITHUB_IMAGE_FULL_NAME="${GITHUB_IMAGE_ID}:${PLANNED_VERSION}${long_suffix}"
-
-          echo "::debug::GITHUB_IMAGE_ID: ${GITHUB_IMAGE_ID}"
-          echo "::debug::GITHUB_IMAGE_FULL_NAME: ${GITHUB_IMAGE_FULL_NAME}"
-
-          echo "::set-output name=github_image_id::${GITHUB_IMAGE_ID}"
-          echo "::set-output name=github_image_full_name::${GITHUB_IMAGE_FULL_NAME}"
-
-
-      - name: Notify that docker image is about to be built
-        uses: rest-gateway/notification-action@master
-        with:
-          message: >-
-            Now building the docker image <b>${APP_NAME}</b>:
-            ${{ steps.set_docker_image_id.outputs.github_image_full_name }}
-          recipient: "${{ secrets.NOTIFICATIONS_DEFAULT_RECIPIENT }}"
-          rest_gateway_url: "${{ secrets.REST_GATEWAY_API_URL }}"
-          rest_gateway_token: "${{ secrets.REST_GATEWAY_TOKEN }}"
-          rest_gateway_bot_name: "${{ secrets.REST_GATEWAY_BOT_NAME }}"
-
-
-      - name: Build Docker image
-        id: build_docker_image
-        shell: bash
-        run: >
-          docker build
-          --tag "ghcr.io/${{ steps.set_docker_image_id.outputs.github_image_full_name }}"
-          --build-arg BUILD_VERSION="${PLANNED_VERSION}"
-          --file Dockerfile
-          .
-
-
-      - name: Push Docker image to registry
-        id: push_docker_image
-        run: |
-          docker push "ghcr.io/${{ steps.set_docker_image_id.outputs.github_image_full_name }}"
 
 
       - name: Download artifact
