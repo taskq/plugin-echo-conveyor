@@ -25,7 +25,7 @@ type PublisherMessageStruct struct {
 	Payload string `json:"payload"`
 }
 
-func PublishMessage(payload []byte, channel string, serverURL *url.URL) (result []byte, err error) {
+func PublishMessage(payload []byte, channel string, serverURL *url.URL) (result bool, err error) {
 
 	serverURL.Path = path.Join(serverURL.Path, "put")
 
@@ -37,7 +37,7 @@ func PublishMessage(payload []byte, channel string, serverURL *url.URL) (result 
 	message, err := json.Marshal(PublisherMessage)
 	if err != nil {
 		fmt.Println(err)
-		return nil, err
+		return false, err
 	}
 
 	log.Info().
@@ -52,7 +52,7 @@ func PublishMessage(payload []byte, channel string, serverURL *url.URL) (result 
 	client := &http.Client{}
 	response, err := client.Do(req)
 	if err != nil {
-		return nil, err
+		return false, err
 	}
 
 	defer response.Body.Close()
@@ -63,7 +63,7 @@ func PublishMessage(payload []byte, channel string, serverURL *url.URL) (result 
 	// body, _ := ioutil.ReadAll(resp.Body)
 	// fmt.Println("response Body:", string(body))
 
-	return payload, nil
+	return true, nil
 }
 
 func ExecCommand(payload []byte, configurationRaw interface{}) (result []byte, err error) {
@@ -120,7 +120,7 @@ func ExecCommand(payload []byte, configurationRaw interface{}) (result []byte, e
 
 	// fmt.Printf("Publishing result: %v\n", publish_result)
 
-	return []byte(fmt.Sprintf(`{"channel": "%v", "payload": "%v"}`, configuration.UpstreamPublisherChannel, configuration.UpstreamPublisherChannel)), nil
+	return payload, nil
 }
 
 func main() {
