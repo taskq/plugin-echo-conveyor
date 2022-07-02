@@ -44,6 +44,8 @@ func PublishMessage(payload []byte, channel string, serverURL *url.URL) (result 
 		Str("plugin", PluginName).
 		Bytes("payload", payload).
 		Str("channel", channel).
+		Str("message", string(message)).
+		Int("quotes_num", strings.Count(string(message), `"`)).
 		Msgf("Preparing to publish a message")
 
 	req, err := http.NewRequest("POST", serverURL.String(), bytes.NewBuffer(message))
