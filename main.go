@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/url"
 	"path"
+	"strings"
 
 	"github.com/rs/zerolog/log"
 )
@@ -21,8 +22,8 @@ type ConfigurationStruct struct {
 }
 
 type PublisherMessageStruct struct {
-	Channel string `json:"channel"`
-	Payload string `json:"payload"`
+	Channel string          `json:"channel"`
+	Payload json.RawMessage `json:"payload"`
 }
 
 func PublishMessage(payload []byte, channel string, serverURL *url.URL) (result bool, err error) {
@@ -31,7 +32,7 @@ func PublishMessage(payload []byte, channel string, serverURL *url.URL) (result 
 
 	PublisherMessage := PublisherMessageStruct{
 		Channel: channel,
-		Payload: string(payload),
+		Payload: payload,
 	}
 
 	message, err := json.Marshal(PublisherMessage)
@@ -44,6 +45,8 @@ func PublishMessage(payload []byte, channel string, serverURL *url.URL) (result 
 		Str("plugin", PluginName).
 		Bytes("payload", payload).
 		Str("channel", channel).
+		Str("message", string(message)).
+		Int("quotes_num", strings.Count(string(message), `"`)).
 		Msgf("Preparing to publish a message")
 
 	req, err := http.NewRequest("POST", serverURL.String(), bytes.NewBuffer(message))
@@ -120,7 +123,7 @@ func ExecCommand(payload []byte, configurationRaw interface{}) (result []byte, e
 
 	// fmt.Printf("Publishing result: %v\n", publish_result)
 
-	return []byte(fmt.Sprintf(`{"channel": "%v", "payload": "%v"}`, configuration.UpstreamPublisherChannel, configuration.UpstreamPublisherChannel)), nil
+	return payload, nil
 }
 
 func main() {
@@ -136,6 +139,6 @@ func main() {
 		UpstreamPublisherChannel: "junk",
 	}
 
-	_, _ = ExecCommand([]byte("beep-boop"), configuration)
+	_, _ = ExecCommand([]byte(`{"hello": "there"}`), configuration)
 
 }

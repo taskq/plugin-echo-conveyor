@@ -1,0 +1,252 @@
+---
+# yamllint disable rule:line-length
+# yamllint disable rule:truthy
+
+name: Release
+
+on:
+  push:
+    branches:
+      - '*'
+  pull_request:
+    branches:
+      - master
+
+jobs:
+
+  validate_new_version:
+    name: Validate new version
+    runs-on: ubuntu-latest
+    outputs:
+      planned_version: ${{ steps.validate_new_version.outputs.planned_version }}
+      version_file_exists: ${{ steps.validate_new_version.outputs.version_file_exists }}
+      tag_hash: ${{ steps.validate_new_version.outputs.tag_hash }}
+      can_create: ${{ steps.validate_new_version.outputs.can_create }}
+      tag_exists: ${{ steps.validate_new_version.outputs.tag_exists }}
+      branch_name: ${{ steps.validate_new_version.outputs.branch_name }}
+
+    steps:
+
+      - name: Check out code
+        uses: actions/checkout@v2
+        with:
+          fetch-depth: 0
+
+
+      - name: Use latest released action
+        id: validate_new_version
+        uses: reinvented-stuff/validate-version-action@master
+        with:
+          version_filename: ".version"
+          github_token: "${{ secrets.GITHUB_TOKEN }}"
+          fail_on_error: true
+
+
+  build_and_test:
+    name: Build and Test
+    runs-on: ubuntu-latest
+    outputs:
+      job_status: ${{ job.status }}
+      artifact_name: ${{ steps.set_artifact_name.outputs.name }}
+
+    needs:
+      - validate_new_version
+
+    env:
+      PLANNED_VERSION: ${{ needs.validate_new_version.outputs.planned_version }}
+      TAG_HASH: ${{ needs.validate_new_version.outputs.tag_hash }}
+      CAN_CREATE_RELEASE: ${{ needs.validate_new_version.outputs.can_create }}
+      TAG_EXISTS: ${{ needs.validate_new_version.outputs.tag_exists }}
+      BRANCH_NAME: ${{ needs.validate_new_version.outputs.branch_name }}
+      APP_NAME: "plugin-echo-conveyor"
+      TARGETOS: "linux"
+      TARGETARCH: "amd64"
+
+    if: >
+      github.event_name == 'push'
+
+    steps:
+
+      - name: Check out code
+        uses: actions/checkout@v2
+        with:
+          fetch-depth: 0
+
+
+      - name: Set up Go
+        uses: actions/setup-go@v3
+        with:
+          go-version: 1.18
+
+
+      - name: Define artifact name
+        id: set_artifact_name
+        run: |
+          echo "::debug::Artifact name: ${{env.APP_NAME}}-${{env.PLANNED_VERSION}}.so"
+          echo "::set-output name=name::${{env.APP_NAME}}-${{env.PLANNED_VERSION}}.so"
+
+
+      - name: Build
+        id: go_build
+        run: >-
+          go build
+          -trimpath 
+          -gcflags="all=-N -l"
+          -ldflags="-X 'main.BuildVersion=${{ env.PLANNED_VERSION }}'"
+          -v -buildmode=plugin
+          -o "${{ steps.set_artifact_name.outputs.name }}"
+
+
+      - name: Upload a Build Artifact
+        uses: actions/upload-artifact@v3.1.0
+        with:
+          name: "${{ steps.set_artifact_name.outputs.name }}"
+          path: "${{ steps.set_artifact_name.outputs.name }}"
+          if-no-files-found: error
+          retention-days: 90
+
+      - name: Send out notification about build
+        uses: rest-gateway/notification-action@master
+        with:
+          message: "<b>${{env.APP_NAME}}</b> built ${{env.PLANNED_VERSION}}"
+          recipient: "${{ secrets.NOTIFICATIONS_DEFAULT_RECIPIENT }}"
+          rest_gateway_url: "${{ secrets.REST_GATEWAY_API_URL }}"
+          rest_gateway_token: "${{ secrets.REST_GATEWAY_TOKEN }}"
+          rest_gateway_bot_name: "${{ secrets.REST_GATEWAY_BOT_NAME }}"
+
+  release:
+    name: Build, Test, Packages
+    runs-on: ubuntu-latest
+
+    env:
+      PLANNED_VERSION: ${{ needs.validate_new_version.outputs.planned_version }}
+      TAG_HASH: ${{ needs.validate_new_version.outputs.tag_hash }}
+      CAN_CREATE_RELEASE: ${{ needs.validate_new_version.outputs.can_create }}
+      TAG_EXISTS: ${{ needs.validate_new_version.outputs.tag_exists }}
+      BRANCH_NAME: ${{ needs.validate_new_version.outputs.branch_name }}
+      ARTIFACT_NAME: ${{ needs.build_and_test.outputs.artifact_name }}
+      APP_NAME: "plugin-echo-conveyor"
+
+    outputs:
+      job_status: ${{ job.status }}
+
+    needs:
+      - validate_new_version
+      - build_and_test
+
+    if: >
+      needs.validate_new_version.outputs.branch_name == 'master' &&
+      github.event_name == 'push'
+
+    steps:
+
+      - name: Check out code
+        uses: actions/checkout@v2
+        with:
+          fetch-depth: 0
+
+
+      - name: Validate envionment variables
+        id: validate_envvars
+        shell: bash
+        run: |
+          [[ ! -z "PLANNED_VERSION" ]] || exit 2
+          [[ ! -z "TAG_HASH" ]] || exit 2
+          [[ ! -z "CAN_CREATE_RELEASE" ]] || exit 2
+          [[ ! -z "TAG_EXISTS" ]] || exit 2
+          [[ ! -z "BRANCH_NAME" ]] || exit 2
+
+
+      - name: Download artifact
+        uses: actions/download-artifact@v3
+        with:
+          name: "${{ env.ARTIFACT_NAME }}"
+          path: "${{ env.ARTIFACT_NAME }}"
+
+      - name: Notify that docker image has been built and pushed
+        uses: rest-gateway/notification-action@master
+        with:
+          message: >-
+            Docker image successfully built and pushed:
+
+            ghcr.io/${{ steps.set_docker_image_id.outputs.github_image_full_name }}
+          recipient: "${{ secrets.NOTIFICATIONS_DEFAULT_RECIPIENT }}"
+          rest_gateway_url: "${{ secrets.REST_GATEWAY_API_URL }}"
+          rest_gateway_token: "${{ secrets.REST_GATEWAY_TOKEN }}"
+          rest_gateway_bot_name: "${{ secrets.REST_GATEWAY_BOT_NAME }}"
+
+
+      - name: Generate changelog
+        id: generate_changelog
+        uses: reinvented-stuff/changelog-render-action@master
+        with:
+          long_changelog_export_filename: ".long_changelog.md"
+          short_changelog_export_filename: ".short_changelog.md"
+          print_out_changelogs: true
+
+
+      - name: Create a new tag
+        if: >
+          needs.validate_new_version.outputs.can_create == 'true' &&
+          needs.validate_new_version.outputs.branch_name == 'master' &&
+          github.event_name == 'push'
+        run: |
+          curl --request POST --url https://api.github.com/repos/${{ github.repository }}/git/tags \
+          -H 'authorization: Bearer ${{ secrets.GITHUB_TOKEN }}' \
+          -H 'content-type: application/json' \
+          --data '{"tag": "${env.PLANNED_VERSION}",
+            "message": "Pipeline build tag",
+            "object": "${{ github.sha }}",
+            "type": "commit",
+            "tagger": {
+              "name": "Alice from Wonderland",
+              "email": "noreply@localhost.localdomain",
+              "date": "${{steps.timestamp.outputs.timestamp}}"
+            }'
+
+
+      - name: Create a Release
+        id: create_release
+        if: >
+          needs.validate_new_version.outputs.can_create == 'true' &&
+          needs.validate_new_version.outputs.branch_name == 'master' &&
+          github.event_name == 'push'
+        uses: actions/create-release@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tag_name: ${{env.PLANNED_VERSION}}
+          release_name: v${{env.PLANNED_VERSION}}
+          body_path: ${{steps.generate_changelog.outputs.short_changelog_export_filename}}
+          draft: false
+          prerelease: false
+
+
+      - name: Upload a Release Asset
+        uses: actions/upload-release-asset@v1.0.2
+        env:
+            GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          upload_url: ${{ steps.create_release.outputs.upload_url }}
+          asset_path: "${{ env.ARTIFACT_NAME }}"
+          asset_name: "${{ env.ARTIFACT_NAME }}"
+          asset_content_type: application/octet-stream
+
+
+      - name: Notify about release
+        uses: rest-gateway/notification-action@master
+        with:
+          message: |
+            <b>Release ${{env.APP_NAME}}:</b> ${{env.PLANNED_VERSION}}
+
+            <b>Docker image:</b>
+            ghcr.io/${{ steps.set_docker_image_id.outputs.github_image_full_name }}
+
+            <b>Release:</b>
+            https://github.com/${{ github.repository }}/releases/tag/${{env.PLANNED_VERSION}}
+          recipient: "${{ secrets.NOTIFICATIONS_DEFAULT_RECIPIENT }}"
+          rest_gateway_url: "${{ secrets.REST_GATEWAY_API_URL }}"
+          rest_gateway_token: "${{ secrets.REST_GATEWAY_TOKEN }}"
+          rest_gateway_bot_name: "${{ secrets.REST_GATEWAY_BOT_NAME }}"
+
+...
