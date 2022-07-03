@@ -22,8 +22,8 @@ type ConfigurationStruct struct {
 }
 
 type PublisherMessageStruct struct {
-	Channel string `json:"channel"`
-	Payload string `json:"payload"`
+	Channel string          `json:"channel"`
+	Payload json.RawMessage `json:"payload"`
 }
 
 func PublishMessage(payload []byte, channel string, serverURL *url.URL) (result bool, err error) {
@@ -32,7 +32,7 @@ func PublishMessage(payload []byte, channel string, serverURL *url.URL) (result 
 
 	PublisherMessage := PublisherMessageStruct{
 		Channel: channel,
-		Payload: string(payload),
+		Payload: payload,
 	}
 
 	message, err := json.Marshal(PublisherMessage)
@@ -139,6 +139,6 @@ func main() {
 		UpstreamPublisherChannel: "junk",
 	}
 
-	_, _ = ExecCommand([]byte("beep-boop"), configuration)
+	_, _ = ExecCommand([]byte(`{"hello": "there"}`), configuration)
 
 }
